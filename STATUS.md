@@ -35,6 +35,7 @@ v1 is implemented and test-covered in this repo. The project now has a working `
 - Ran a live smoke test: XML watcher executed Codex in tmux, captured `session_id`, and wrote assistant response back into the file.
 - Ran `scripts/ralph/ralph.sh --tool codex 1`; loop completed with `<promise>COMPLETE</promise>` and moved work to branch `ralph/xml-prompt-orchestrator-v1`.
 - Added ignore rules for Ralph runtime files (`scripts/ralph/.last-branch`, `scripts/ralph/archive/`) to keep worktree clean.
+- Updated Ralph prompt templates to explicitly reference `scripts/ralph/prd.json` and `scripts/ralph/progress.txt`.
 
 ## Next Steps
 1. Add one integration test that simulates tmux lifecycle and assistant writeback with a fake backend command.
