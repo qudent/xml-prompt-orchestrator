@@ -77,6 +77,7 @@ The system must stay intentionally simple and readable: short code, minimal movi
 - FR-14: If `HEAD` is unavailable, fallback annotation must be consistent (e.g. `no-head`).
 - FR-15: Write operations must be atomic to avoid partial file corruption.
 - FR-16: The script should be small and readable with minimal dependencies.
+- FR-17: Implementation should follow test-driven development for parser, fork logic, and command orchestration.
 
 ## 5. Non-Goals (Out of Scope)
 - Multi-user collaboration or remote syncing.
@@ -93,6 +94,7 @@ The system must stay intentionally simple and readable: short code, minimal movi
 
 ## 7. Technical Considerations
 - Candidate implementation language: Python 3 (standard library first).
+- Use TDD: write failing tests first, then minimal implementation, then refactor for readability.
 - File watch can be mtime polling loop (simple) or optional watchdog dependency.
 - `tmux capture-pane` or redirected shell output can provide logs.
 - Parsing "resume session with ..." text should tolerate small output variations.
@@ -121,13 +123,13 @@ The system must stay intentionally simple and readable: short code, minimal movi
    D. Other (specify)
 
 3. How should message IDs be assigned?
-   A. Stable UUID per message [Recommended]  
+   A. Stable UUID per message [Recommended] yes, but the UUID shouldn't be too long  
    B. Sequential integers per branch (`m1`, `m2`, ...)  
    C. Content hash of message text  
-   D. Other (specify)
+   D. Other (specify) 
 
 4. How do we detect a "middle edit" that should fork?
-   A. Any text change to a non-tip human message triggers fork [Recommended]  
+   A. Any text change to a non-tip human message triggers fork [Recommended] yes 
    B. Only changes to `<human>` body trigger fork (metadata edits ignored)  
    C. Fork only when user explicitly marks `fork="true"`  
    D. Other (specify)
@@ -142,29 +144,30 @@ The system must stay intentionally simple and readable: short code, minimal movi
    A. Explicit attribute in root tag (e.g. `active_branch="b3"`) [Recommended]  
    B. Branch of most recently edited message  
    C. Always latest-created branch  
-   D. Other (specify)
+   D. Other (specify)  as I understand there is no "active branch"? there should be an xml structure with messages below each other, and <branch> </branch> or similar in newlines enclosing forked-off paths, and on edit, the branch is detected by looking where a message was inserted? does this not work? 
 
 7. How should first-run Codex execution work?
-   A. `codex exec "<prompt>"` in tmux [Recommended]  
+   A. `codex exec "<prompt>"` in tmux [Recommended]  yes
    B. `codex exec -` with stdin prompt piping  
    C. Always use JSON mode (`codex exec --json`)  
    D. Other (specify)
 
 8. How should continuation/resume work?
-   A. Use stored `session_id`; fallback to `codex exec resume --last` [Recommended]  
+   A. Use stored `session_id`; fallback to `codex exec resume --last` [Recommended] no fallback. session_id should be stored in metadata.   
+(if session_id not available: new session. to be clear session_id should be stored)
    B. Always use `--last`  
    C. Never resume; always fresh `codex exec`  
    D. Other (specify)
 
 9. What Codex metadata should be persisted per assistant message?
-   A. `session_id` + tmux log path [Recommended]  
+   A. `session_id` + tmux log path [Recommended] what is your rationale for tmux log path? 
    B. `session_id` only  
    C. Full raw Codex output in XML metadata  
-   D. Other (specify)
+   D. Other (specify) codex should print one final "answer message" in the end (or is this incorrect?) I would ideally like to ask a question, and then see the answer/the last message before codex gives back control to the user appear in the file
 
 10. What should run timeout behavior be?
    A. Hard timeout (e.g. 10 min), kill tmux, write error node [Recommended]  
-   B. No timeout; wait indefinitely  
+   B. No timeout; wait indefinitely B is right, but possible to insert <kill> maybe 
    C. Soft timeout warning only, keep running  
    D. Other (specify)
 
@@ -181,7 +184,7 @@ The system must stay intentionally simple and readable: short code, minimal movi
    D. Other (specify)
 
 13. How should concurrent saves during an active run be handled?
-   A. Keep only latest pending save (drop intermediate) [Recommended]  
+   A. Keep only latest pending save (drop intermediate) [Recommended] the codex should NOT write to the file itself. the orchestrator should do that and use async to update things 
    B. Queue all saves FIFO  
    C. Cancel active run and restart immediately  
    D. Other (specify)
@@ -194,6 +197,6 @@ The system must stay intentionally simple and readable: short code, minimal movi
 
 15. Should v1 support Claude Code CLI as a backend too?
    A. No, Codex only in v1 [Recommended]  
-   B. Yes, Codex + Claude in v1  
+   B. Yes, Codex + Claude in v1 B 
    C. Codex now, but pluggable backend interface in code design  
    D. Other (specify)
