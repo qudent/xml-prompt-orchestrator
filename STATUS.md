@@ -1,7 +1,7 @@
 # XML Prompt Orchestrator - Status
 
 ## Current State
-v1 is implemented and test-covered in this repo. The project now has a working `orchestrator.py`, unit tests, locked design decisions in the PRD, and a configured Ralph loop (`scripts/ralph/`) with project-specific `prd.json` and `progress.txt`.
+v1 is implemented and test-covered in this repo. The project now has a working `orchestrator.py`, unit tests, locked design decisions in the PRD, and a configured Ralph loop (`scripts/ralph/`) with project-specific `prd.json` and `progress.txt`. Ralph smoke-run has been executed and returned `<promise>COMPLETE</promise>`.
 
 ## Active Goals
 - [x] Finalize product decisions
@@ -33,7 +33,9 @@ v1 is implemented and test-covered in this repo. The project now has a working `
 - Added Ralph loop files under `scripts/ralph/` and converted project plan into `scripts/ralph/prd.json`.
 - Added `.gitignore` entries for Python cache and orchestrator runtime logs.
 - Ran a live smoke test: XML watcher executed Codex in tmux, captured `session_id`, and wrote assistant response back into the file.
+- Ran `scripts/ralph/ralph.sh --tool codex 1`; loop completed with `<promise>COMPLETE</promise>` and moved work to branch `ralph/xml-prompt-orchestrator-v1`.
+- Added ignore rules for Ralph runtime files (`scripts/ralph/.last-branch`, `scripts/ralph/archive/`) to keep worktree clean.
 
 ## Next Steps
 1. Add one integration test that simulates tmux lifecycle and assistant writeback with a fake backend command.
-2. If desired, start `scripts/ralph/ralph.sh --tool codex` for ongoing iterative maintenance stories.
+2. If desired, continue iterative work on `ralph/xml-prompt-orchestrator-v1` via `scripts/ralph/ralph.sh`.
