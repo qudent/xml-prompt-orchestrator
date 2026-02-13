@@ -1,0 +1,99 @@
+{
+  "project": "xml-prompt-orchestrator",
+  "branchName": "ralph/xml-prompt-orchestrator-v1",
+  "description": "Single-file XML prompt orchestrator with forking, git annotations, tmux-backed Codex/Claude runs, and plain-editor controls.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Implement XML data model and canonical rewrite",
+      "description": "As an operator, I want one XML file that stays canonical after each save so plain text edits are deterministic.",
+      "acceptanceCriteria": [
+        "Conversation file is parsed as XML and rewritten in canonical formatting",
+        "Each human/assistant message is annotated with git head_short and dirty state",
+        "Write operations are atomic",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Implemented in orchestrator.py with canonical_xml_text, annotate_git, and atomic_write."
+    },
+    {
+      "id": "US-002",
+      "title": "Implement fork-on-middle-edit behavior",
+      "description": "As an operator, I want editing a non-tip human message to preserve old history and create a new branch.",
+      "acceptanceCriteria": [
+        "If a non-tip human message text changes, old text is restored on original branch",
+        "A new branch node is inserted with a new human message for edited content",
+        "Forked human message supports resume_from metadata",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Implemented in apply_middle_edit_forks and covered by unit tests."
+    },
+    {
+      "id": "US-003",
+      "title": "Implement backend command planning and output parsing",
+      "description": "As an operator, I want Codex and Claude backend command support with final assistant message extraction.",
+      "acceptanceCriteria": [
+        "Codex first-run and resume commands are generated from backend + session metadata",
+        "Claude first-run and resume commands are generated from backend + session metadata",
+        "Backend output parser extracts session id and final assistant message",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Implemented in build_backend_command and parse_backend_output."
+    },
+    {
+      "id": "US-004",
+      "title": "Implement tmux-backed watch loop runtime",
+      "description": "As an operator, I want each prompt run to execute in disposable tmux sessions with log files and assistant writeback.",
+      "acceptanceCriteria": [
+        "Watcher polls conversation file for saves and starts runs for pending human messages",
+        "Each run uses a dedicated tmux session and log file in .xml-orchestrator/logs",
+        "On completion, final assistant message is inserted under the triggering human message",
+        "tmux session is cleaned up after run completion",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Implemented in WatchLoop _start_run/_check_active_run."
+    },
+    {
+      "id": "US-005",
+      "title": "Implement plain-editor cancellation and pending-save behavior",
+      "description": "As an operator, I want to cancel a running prompt with killed=true and keep orchestration file writes owned by the orchestrator.",
+      "acceptanceCriteria": [
+        "If running human message is saved with killed=true, orchestrator kills tmux run",
+        "Cancellation writes an assistant error node in conversation XML",
+        "During active run, orchestrator remains sole writer of XML file",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Implemented in WatchLoop _process_save and _kill_active."
+    },
+    {
+      "id": "US-006",
+      "title": "Create test suite for orchestrator core logic",
+      "description": "As a maintainer, I want tests for command building, output parsing, pending detection, and fork logic so changes stay safe.",
+      "acceptanceCriteria": [
+        "Unit tests cover backend command generation",
+        "Unit tests cover codex output parsing",
+        "Unit tests cover pending human detection",
+        "Unit tests cover middle-edit fork behavior",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Implemented in tests/test_orchestrator.py."
+    }
+  ]
+}

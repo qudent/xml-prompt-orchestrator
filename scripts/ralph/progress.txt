@@ -1,0 +1,22 @@
+# Ralph Progress Log
+Started: 2026-02-13
+---
+
+## Codebase Patterns
+- Keep orchestrator logic in one small Python module (`orchestrator.py`) plus one focused test file (`tests/test_orchestrator.py`).
+- Conversation branching is structural: edits to non-tip `<human>` nodes fork by creating `<branch>` nodes, rather than mutating existing history.
+- Cancellation is plain-editor-first: set `killed="true"` on `<human>`; do not introduce separate control nodes.
+- Backend process never writes conversation XML directly; orchestrator owns canonical rewrite and atomic writes.
+
+## 2026-02-13T20:15:00Z - US-001..US-006
+- Implemented initial v1 end-to-end orchestrator runtime and tests in a bootstrap iteration.
+- Files changed:
+  - orchestrator.py
+  - tests/test_orchestrator.py
+  - tasks/prd-xml-prompt-orchestrator.md
+  - STATUS.md
+- Learnings for future iterations:
+  - `codex exec --json` emits `thread.started` and `item.completed` events, making session and final-message extraction straightforward.
+  - Fork behavior stays understandable when original text is restored and edited content is moved to a new branch node.
+  - Keep branch selection implicit from XML structure; explicit active-branch metadata is unnecessary for v1.
+---

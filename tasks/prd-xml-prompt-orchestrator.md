@@ -113,94 +113,19 @@ The system must stay intentionally simple and readable: short code, minimal movi
 - Fork creation is deterministic for repeated mid-history edits.
 - Operator can resume a prior Codex session from stored metadata in under 30 seconds.
 
-## 9. Open Questions
-1. What is the source-of-truth file model?
-   A. Single XML file only (edit + canonical rewrite in same file) [Recommended]  
-   B. Editable text file + generated XML file  
-   C. XML file + sidecar metadata file for runtime state  
-   D. Other (specify)
-
-2. What should trigger canonical rewrite?
-   A. Rewrite on every valid save (even without new prompt) [Recommended]  
-   B. Rewrite only after Codex run completes  
-   C. Rewrite only when structural changes are detected  
-   D. Other (specify)
-
-3. How should message IDs be assigned?
-   A. Stable UUID per message [Recommended] yes, but the UUID shouldn't be too long  
-   B. Sequential integers per branch (`m1`, `m2`, ...)  
-   C. Content hash of message text  
-   D. Other (specify) 
-
-4. How do we detect a "middle edit" that should fork?
-   A. Any text change to a non-tip human message triggers fork [Recommended] yes 
-   B. Only changes to `<human>` body trigger fork (metadata edits ignored)  
-   C. Fork only when user explicitly marks `fork="true"`  
-   D. Other (specify)
-
-5. What happens to downstream messages after a middle edit?
-   A. Preserve old branch untouched; create new branch from edit point [Recommended]  
-   B. Delete downstream messages and regenerate in place  
-   C. Keep downstream messages in same branch but mark `stale="true"`  
-   D. Other (specify)
-
-6. How is the active branch selected on save?
-   A. Explicit attribute in root tag (e.g. `active_branch="b3"`) [Recommended]  
-   B. Branch of most recently edited message  
-   C. Always latest-created branch  
-   D. Other (specify)  as I understand there is no "active branch"? there should be an xml structure with messages below each other, and <branch> </branch> or similar in newlines enclosing forked-off paths, and on edit, the branch is detected by looking where a message was inserted? does this not work? 
-
-7. How should first-run Codex execution work?
-   A. `codex exec "<prompt>"` in tmux [Recommended]  yes
-   B. `codex exec -` with stdin prompt piping  
-   C. Always use JSON mode (`codex exec --json`)  
-   D. Other (specify)
-
-8. How should continuation/resume work?
-   A. Use stored `session_id`; fallback to `codex exec resume --last` [Recommended] no fallback. session_id should be stored in metadata.   
-(if session_id not available: new session. to be clear session_id should be stored)
-   B. Always use `--last`  
-   C. Never resume; always fresh `codex exec`  
-   D. Other (specify)
-
-9. What Codex metadata should be persisted per assistant message?
-   A. `session_id` + tmux log path [Recommended] what is your rationale for tmux log path? 
-   B. `session_id` only  
-   C. Full raw Codex output in XML metadata  
-   D. Other (specify) codex should print one final "answer message" in the end (or is this incorrect?) I would ideally like to ask a question, and then see the answer/the last message before codex gives back control to the user appear in the file
-
-10. What should run timeout behavior be?
-   A. Hard timeout (e.g. 10 min), kill tmux, write error node [Recommended]  
-   B. No timeout; wait indefinitely B is right. Cancellation is requested by setting `killed="true"` on the relevant `<human>` message tag. 
-   C. Soft timeout warning only, keep running  
-   D. Other (specify)
-
-11. How should git state annotation be recorded?
-   A. `head_short` + `dirty` flag (no auto-commit) [Recommended]  
-   B. `head_short` only  
-   C. Auto-commit each message for exact snapshot hash  
-   D. Other (specify)
-
-12. What if repo has no commits yet?
-   A. Annotate `head_short="no-head"` and continue [Recommended]  
-   B. Block runs until first commit exists  
-   C. Auto-create initial commit  
-   D. Other (specify)
-
-13. How should concurrent saves during an active run be handled?
-   A. Keep only latest pending save (drop intermediate) [Recommended] the codex should NOT write to the file itself. the orchestrator should do that and use async to update things 
-   B. Queue all saves FIFO  
-   C. Cancel active run and restart immediately  
-   D. Other (specify)
-
-14. How should failed Codex runs appear in the file?
-   A. Insert `<assistant status="error">` with short error summary [Recommended]  
-   B. Do not write assistant node; log only  
-   C. Retry automatically N times before writing anything  
-   D. Other (specify)
-
-15. Should v1 support Claude Code CLI as a backend too?
-   A. No, Codex only in v1 [Recommended]  
-   B. Yes, Codex + Claude in v1 B 
-   C. Codex now, but pluggable backend interface in code design  
-   D. Other (specify)
+## 9. Locked Decisions
+- D-1: Source of truth is one XML file; user edits and canonical rewrite happen in that same file.
+- D-2: Canonical rewrite runs on every valid save.
+- D-3: Message IDs use short UUID-style IDs (human-readable, not full-length UUID strings).
+- D-4: Any text change to a non-tip `<human>` message creates a fork.
+- D-5: On fork, old downstream path is preserved; new branch is created from the edit point.
+- D-6: No explicit active-branch field. Branch is inferred from XML structure and edit location.
+- D-7: First run uses backend non-interactive invocation in tmux (`codex exec "<prompt>"` pattern).
+- D-8: Resume uses stored `session_id`; if missing, start a new session (no `--last` fallback).
+- D-9: Persist `session_id` and tmux log path in metadata. Final assistant answer from backend output is written into the XML as the assistant message text.
+- D-10: Default is no timeout. Cancellation is user-driven by setting `killed="true"` on the target `<human>` message.
+- D-11: Git annotation stores `head_short` plus `dirty` flag (no auto-commit).
+- D-12: If repository has no commits, annotate `head_short="no-head"` and continue.
+- D-13: During an active run, keep only the latest pending save. Orchestrator owns all file writes; backend process never writes XML directly.
+- D-14: Failed runs produce an `<assistant status="error">` node with short summary.
+- D-15: v1 supports both Codex and Claude backends.
