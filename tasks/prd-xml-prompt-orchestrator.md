@@ -108,38 +108,92 @@ The system must stay intentionally simple and readable: short code, minimal movi
 - Operator can resume a prior Codex session from stored metadata in under 30 seconds.
 
 ## 9. Open Questions
-1. What should be the source-of-truth file model?
-   A. Single file only (edit + canonical rewrite in same file)  
-   B. `conversation.txt` editable + generated `conversation.xml`  
-   C. Single XML file only; no freeform text mode  
+1. What is the source-of-truth file model?
+   A. Single XML file only (edit + canonical rewrite in same file) [Recommended]  
+   B. Editable text file + generated XML file  
+   C. XML file + sidecar metadata file for runtime state  
    D. Other (specify)
 
-2. What should happen to downstream assistant messages when a middle human message is edited?
-   A. Preserve old downstream messages on old branch; create fresh branch from edit point  
+2. What should trigger canonical rewrite?
+   A. Rewrite on every valid save (even without new prompt) [Recommended]  
+   B. Rewrite only after Codex run completes  
+   C. Rewrite only when structural changes are detected  
+   D. Other (specify)
+
+3. How should message IDs be assigned?
+   A. Stable UUID per message [Recommended]  
+   B. Sequential integers per branch (`m1`, `m2`, ...)  
+   C. Content hash of message text  
+   D. Other (specify)
+
+4. How do we detect a "middle edit" that should fork?
+   A. Any text change to a non-tip human message triggers fork [Recommended]  
+   B. Only changes to `<human>` body trigger fork (metadata edits ignored)  
+   C. Fork only when user explicitly marks `fork="true"`  
+   D. Other (specify)
+
+5. What happens to downstream messages after a middle edit?
+   A. Preserve old branch untouched; create new branch from edit point [Recommended]  
    B. Delete downstream messages and regenerate in place  
-   C. Keep downstream messages but mark them stale in same branch  
+   C. Keep downstream messages in same branch but mark `stale="true"`  
    D. Other (specify)
 
-3. How should git hash annotation be defined?
-   A. Use current `HEAD` short hash only (no auto-commit)  
-   B. Auto-commit after each message so hash is exact end-state snapshot  
-   C. Store both `HEAD` hash and dirty flag  
+6. How is the active branch selected on save?
+   A. Explicit attribute in root tag (e.g. `active_branch="b3"`) [Recommended]  
+   B. Branch of most recently edited message  
+   C. Always latest-created branch  
    D. Other (specify)
 
-4. What should be persisted for Codex resumability?
-   A. Parsed "resume session with ..." token only  
-   B. Token + full tmux log path  
-   C. Full raw Codex output block in metadata  
+7. How should first-run Codex execution work?
+   A. `codex exec "<prompt>"` in tmux [Recommended]  
+   B. `codex exec -` with stdin prompt piping  
+   C. Always use JSON mode (`codex exec --json`)  
    D. Other (specify)
 
-5. How should background job conflicts be handled?
-   A. Ignore saves while one run is active (queue latest)  
-   B. Cancel active run and start new one on save  
-   C. Queue all saves FIFO  
+8. How should continuation/resume work?
+   A. Use stored `session_id`; fallback to `codex exec resume --last` [Recommended]  
+   B. Always use `--last`  
+   C. Never resume; always fresh `codex exec`  
    D. Other (specify)
 
-6. Should v1 support Claude Code CLI as a second backend?
-   A. No, Codex only (keep implementation smallest)  
-   B. Yes, add optional Claude backend now  
-   C. Yes later, but design interfaces for pluggable backends in v1  
+9. What Codex metadata should be persisted per assistant message?
+   A. `session_id` + tmux log path [Recommended]  
+   B. `session_id` only  
+   C. Full raw Codex output in XML metadata  
+   D. Other (specify)
+
+10. What should run timeout behavior be?
+   A. Hard timeout (e.g. 10 min), kill tmux, write error node [Recommended]  
+   B. No timeout; wait indefinitely  
+   C. Soft timeout warning only, keep running  
+   D. Other (specify)
+
+11. How should git state annotation be recorded?
+   A. `head_short` + `dirty` flag (no auto-commit) [Recommended]  
+   B. `head_short` only  
+   C. Auto-commit each message for exact snapshot hash  
+   D. Other (specify)
+
+12. What if repo has no commits yet?
+   A. Annotate `head_short="no-head"` and continue [Recommended]  
+   B. Block runs until first commit exists  
+   C. Auto-create initial commit  
+   D. Other (specify)
+
+13. How should concurrent saves during an active run be handled?
+   A. Keep only latest pending save (drop intermediate) [Recommended]  
+   B. Queue all saves FIFO  
+   C. Cancel active run and restart immediately  
+   D. Other (specify)
+
+14. How should failed Codex runs appear in the file?
+   A. Insert `<assistant status="error">` with short error summary [Recommended]  
+   B. Do not write assistant node; log only  
+   C. Retry automatically N times before writing anything  
+   D. Other (specify)
+
+15. Should v1 support Claude Code CLI as a backend too?
+   A. No, Codex only in v1 [Recommended]  
+   B. Yes, Codex + Claude in v1  
+   C. Codex now, but pluggable backend interface in code design  
    D. Other (specify)

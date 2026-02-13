@@ -15,16 +15,19 @@ Planning phase complete. The repo is initialized and a full PRD exists at `tasks
   - [x] Add background tmux execution + cleanup requirement
   - [x] Add Codex resume/log metadata requirement
 - [ ] Resolve open product decisions from PRD
-  - [ ] File model (single file vs editable+generated split)
-  - [ ] Fork downstream handling policy
-  - [ ] Git hash policy (`HEAD` only vs auto-commit vs dirty+hash)
-  - [ ] Resume metadata depth (token only vs token+log)
+  - [ ] File model and canonical rewrite policy
+  - [ ] Message ID and fork-detection policy
+  - [ ] Branch selection and downstream branch preservation policy
+  - [ ] Codex first-run/resume invocation policy
+  - [ ] Metadata persistence depth (session id/log/error payload)
+  - [ ] Timeout/failure handling policy
+  - [ ] Git annotation policy (`HEAD` vs `HEAD+dirty` vs auto-commit)
   - [ ] Save conflict policy while run is active
   - [ ] Backend scope (Codex-only vs optional Claude backend)
 - [ ] Implement minimal v1 orchestrator after decisions are finalized
 
 ## Blockers
-- Waiting on owner answers to the 6 PRD questions in section "Open Questions".
+- Waiting on owner answers to the expanded 15-question decision set in PRD section "Open Questions".
 - No coding should start yet, because unresolved decisions directly affect storage format and control flow.
 
 ## Recent Results
@@ -33,6 +36,7 @@ Planning phase complete. The repo is initialized and a full PRD exists at `tasks
 - Wrote PRD: `tasks/prd-xml-prompt-orchestrator.md`.
 - Incorporated new requirement: Codex runs in disposable background tmux sessions with accessible logs and resumable session annotation.
 - Corrected command terminology after docs check: replace `codex -print -resume` with Codex-native `codex exec` / `codex exec resume`.
+- Expanded open questions into a full decision matrix (15 questions) with recommended defaults to reduce ambiguity before implementation.
 
 ## Next Steps
 1. Get answers to PRD Open Questions (reply format: `1A, 2B, 3C, ...`).
