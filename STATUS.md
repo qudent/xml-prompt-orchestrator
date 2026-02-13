@@ -1,7 +1,7 @@
 # XML Prompt Orchestrator - Status
 
 ## Current State
-Planning is active with owner feedback now incorporated into `tasks/prd-xml-prompt-orchestrator.md`. Several decisions are resolved, several are still open, and implementation will follow TDD once final decisions are locked.
+Planning is active with owner feedback now incorporated into `tasks/prd-xml-prompt-orchestrator.md`. Control semantics are simplified for plain-text editing: no control nodes, cancellation via `killed="true"` on user message tags. Implementation will follow TDD once remaining decisions are locked.
 
 ## Active Goals
 - [x] Create repository and baseline docs
@@ -19,7 +19,7 @@ Planning is active with owner feedback now incorporated into `tasks/prd-xml-prom
   - [x] Fork detection: edit to non-tip human message triggers fork
   - [x] First-run invocation: `codex exec "<prompt>"` in tmux
   - [x] Resume policy: use stored `session_id`; if missing, start new session (no `--last` fallback)
-  - [x] Timeout policy: default no timeout; consider explicit kill mechanism
+  - [x] Timeout/cancel policy: default no timeout; cancel via `killed="true"` on `<human>` tag
   - [x] Write ownership: orchestrator writes XML file, not Codex process
   - [x] Backend scope: include Codex + Claude support in v1
   - [ ] File model and canonical rewrite policy
@@ -48,6 +48,7 @@ Planning is active with owner feedback now incorporated into `tasks/prd-xml-prom
 - Expanded open questions into a full decision matrix (15 questions) with recommended defaults to reduce ambiguity before implementation.
 - Ran a live Codex CLI check (`codex exec` and `codex exec --json`) and confirmed it emits a final assistant message that can be captured and written by the orchestrator.
 - Added explicit TDD requirement for implementation process.
+- Locked cancellation design to plain-text-friendly `killed="true"` attribute on `<human>` messages; dropped separate control-node approach.
 
 ## Next Steps
 1. Commit owner PRD feedback and status update.

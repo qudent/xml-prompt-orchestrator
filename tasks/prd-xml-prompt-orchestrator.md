@@ -78,6 +78,8 @@ The system must stay intentionally simple and readable: short code, minimal movi
 - FR-15: Write operations must be atomic to avoid partial file corruption.
 - FR-16: The script should be small and readable with minimal dependencies.
 - FR-17: Implementation should follow test-driven development for parser, fork logic, and command orchestration.
+- FR-18: Cancellation must use a simple attribute on an existing user message tag (`killed="true"`), not a dedicated control node.
+- FR-19: The format must remain easy to edit in plain text editors without extra command syntax blocks.
 
 ## 5. Non-Goals (Out of Scope)
 - Multi-user collaboration or remote syncing.
@@ -91,6 +93,8 @@ The system must stay intentionally simple and readable: short code, minimal movi
 - Favor explicit tags/attributes over dense shorthand.
 - Preserve stable message IDs so diffs remain understandable.
 - Prefer one script plus one config file max for v1.
+- Plain-text-editor first: control intent should be encoded as simple attributes on normal message tags.
+- No separate `<control .../>` structure in v1.
 
 ## 7. Technical Considerations
 - Candidate implementation language: Python 3 (standard library first).
@@ -167,7 +171,7 @@ The system must stay intentionally simple and readable: short code, minimal movi
 
 10. What should run timeout behavior be?
    A. Hard timeout (e.g. 10 min), kill tmux, write error node [Recommended]  
-   B. No timeout; wait indefinitely B is right, but possible to insert <kill> maybe 
+   B. No timeout; wait indefinitely B is right. Cancellation is requested by setting `killed="true"` on the relevant `<human>` message tag. 
    C. Soft timeout warning only, keep running  
    D. Other (specify)
 
