@@ -20,10 +20,11 @@ Planning phase complete. The repo is initialized and a full PRD exists at `tasks
   - [ ] Git hash policy (`HEAD` only vs auto-commit vs dirty+hash)
   - [ ] Resume metadata depth (token only vs token+log)
   - [ ] Save conflict policy while run is active
+  - [ ] Backend scope (Codex-only vs optional Claude backend)
 - [ ] Implement minimal v1 orchestrator after decisions are finalized
 
 ## Blockers
-- Waiting on owner answers to the 5 PRD questions in section "Open Questions".
+- Waiting on owner answers to the 6 PRD questions in section "Open Questions".
 - No coding should start yet, because unresolved decisions directly affect storage format and control flow.
 
 ## Recent Results

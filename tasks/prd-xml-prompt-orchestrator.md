@@ -137,3 +137,9 @@ The system must stay intentionally simple and readable: short code, minimal movi
    B. Cancel active run and start new one on save  
    C. Queue all saves FIFO  
    D. Other (specify)
+
+6. Should v1 support Claude Code CLI as a second backend?
+   A. No, Codex only (keep implementation smallest)  
+   B. Yes, add optional Claude backend now  
+   C. Yes later, but design interfaces for pluggable backends in v1  
+   D. Other (specify)
