@@ -167,6 +167,83 @@ class OrchestratorLogicTests(unittest.TestCase):
             self.assertEqual(assistant.get("session_id"), "sess-integration")
             self.assertIsNone(human.get("running"))
 
+    def test_integration_recover_writeback_after_stale_human_resave(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "repo"
+            repo.mkdir()
+            original_text = (
+                "<conversation backend=\"codex\">\n"
+                "  <human>Repeat exactly: OK</human>\n"
+                "</conversation>\n"
+            )
+            conversation = repo / "orchestration.xml"
+            conversation.write_text(original_text, encoding="utf-8")
+
+            py_subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True, text=True)
+            py_subprocess.run(
+                ["git", "config", "user.email", "test@example.com"], cwd=repo, check=True, capture_output=True, text=True
+            )
+            py_subprocess.run(
+                ["git", "config", "user.name", "Test User"], cwd=repo, check=True, capture_output=True, text=True
+            )
+            py_subprocess.run(["git", "add", "orchestration.xml"], cwd=repo, check=True, capture_output=True, text=True)
+            py_subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, text=True)
+
+            loop = orchestrator.WatchLoop(
+                conversation_file=conversation,
+                repo_path=repo,
+                poll_seconds=0.01,
+                use_inotify=False,
+            )
+
+            real_run = py_subprocess.run
+            session_state = {"running": True}
+
+            def fake_run(cmd, *args, **kwargs):
+                if isinstance(cmd, list) and cmd and cmd[0] == "tmux":
+                    if len(cmd) > 1 and cmd[1] == "new-session":
+                        shell_cmd = cmd[-1]
+                        match = re.search(r">\s*(?:'([^']+)'|(\S+))\s+2>&1", shell_cmd)
+                        self.assertIsNotNone(match, "unable to parse tmux log redirection path")
+                        log_path = Path(match.group(1) or match.group(2))
+                        log_path.parent.mkdir(parents=True, exist_ok=True)
+                        log_path.write_text(
+                            (
+                                '{"type":"thread.started","thread_id":"sess-recover"}\n'
+                                '{"type":"item.completed","item":{"type":"agent_message","text":"OK"}}\n'
+                            ),
+                            encoding="utf-8",
+                        )
+                        return py_subprocess.CompletedProcess(cmd, 0, "", "")
+                    if len(cmd) > 1 and cmd[1] == "has-session":
+                        return py_subprocess.CompletedProcess(cmd, 0 if session_state["running"] else 1, "", "")
+                    if len(cmd) > 1 and cmd[1] == "kill-session":
+                        session_state["running"] = False
+                        return py_subprocess.CompletedProcess(cmd, 0, "", "")
+                return real_run(cmd, *args, **kwargs)
+
+            with mock.patch("orchestrator.subprocess.run", side_effect=fake_run):
+                # First save starts the run and writes id/running markers.
+                loop.tick()
+                self.assertIsNotNone(loop.active_run)
+
+                # Simulate stale editor save that overwrites file and removes markers.
+                conversation.write_text(original_text, encoding="utf-8")
+
+                # Complete session; writeback should recover target human and not drop output.
+                session_state["running"] = False
+                loop.tick()
+                self.assertIsNone(loop.active_run)
+
+            root = ET.parse(conversation).getroot()
+            humans = list(root.findall("human"))
+            assistants = list(root.findall("assistant"))
+            self.assertGreaterEqual(len(humans), 1)
+            self.assertGreaterEqual(len(assistants), 1)
+            self.assertEqual((assistants[-1].text or "").strip(), "OK")
+            self.assertEqual(assistants[-1].get("status"), "ok")
+            self.assertEqual(assistants[-1].get("session_id"), "sess-recover")
+
 
 if __name__ == "__main__":
     unittest.main()
