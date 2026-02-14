@@ -1,7 +1,7 @@
 # XML Prompt Orchestrator - Status
 
 ## Current State
-v1 is implemented, test-covered, and now patched to avoid self-triggering save loops in Dropbox-backed repos. As of 2026-02-14, the watcher supports Linux inotify push notifications (`--watch-mode auto`) with polling fallback, and identical XML content is no longer rewritten.
+v1 is implemented, test-covered, and patched to avoid self-triggering save loops in Dropbox-backed repos. Watch mode defaults to Linux inotify when available (`--watch-mode auto`) with polling fallback, and unchanged canonical XML is no longer rewritten.
 
 ## Active Goals
 - [x] Finalize product decisions
@@ -22,7 +22,7 @@ v1 is implemented, test-covered, and now patched to avoid self-triggering save l
   - [x] Add Linux inotify watcher with polling fallback
   - [x] Add regression test for no-op write behavior
   - [x] Verify Dropbox returns to steady state after stopping pollers
-- [ ] Add one integration test for tmux lifecycle + assistant writeback
+- [x] Add one integration test for tmux lifecycle + assistant writeback
 
 ## Blockers
 - None for current local workflow.
@@ -34,10 +34,14 @@ v1 is implemented, test-covered, and now patched to avoid self-triggering save l
 - Implemented no-op write suppression so unchanged canonical XML does not update mtime.
 - Added `LinuxInotifyWatcher` and `--watch-mode {auto,poll}` CLI option.
 - Updated bootstrap script to launch watcher with `--watch-mode auto`.
-- Added test `test_write_if_changed_skips_identical_content`.
+- Added regression test `test_write_if_changed_skips_identical_content`.
+- Added integration test `test_integration_tmux_lifecycle_and_assistant_writeback`.
 - Test suite passes: `python3 -m unittest discover -s tests -v`.
+- Launched a fresh live Dropbox test repo and watcher:
+  - repo: `/home/name/Dropbox/xml-orchestrator-test-20260214-110942`
+  - session: `xml_orch_test_xml_orchestrator_test_20260214_110942__110942`
 
 ## Next Steps
-1. Add a focused integration test that simulates tmux session completion and assistant writeback.
+1. Manually edit the live `orchestration.xml` in the new test repo and verify assistant writeback.
 2. Consider ignoring high-churn generated paths (for example `.venv`, `.cache`, model artifacts) in Dropbox test repos.
 3. Optionally expose a `--once` debug mode for deterministic local troubleshooting.

@@ -1,9 +1,12 @@
 import copy
+import re
+import subprocess as py_subprocess
 import tempfile
 import time
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from unittest import mock
 
 import orchestrator
 
@@ -92,6 +95,77 @@ class OrchestratorLogicTests(unittest.TestCase):
             self.assertFalse(orchestrator.write_if_changed(target, text))
             second_mtime = target.stat().st_mtime_ns
             self.assertEqual(first_mtime, second_mtime)
+
+    def test_integration_tmux_lifecycle_and_assistant_writeback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "repo"
+            repo.mkdir()
+            conversation = repo / "orchestration.xml"
+            conversation.write_text(
+                (
+                    "<conversation backend=\"codex\">\n"
+                    "  <human id=\"h1\">Reply with exactly: OK</human>\n"
+                    "</conversation>\n"
+                ),
+                encoding="utf-8",
+            )
+
+            py_subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True, text=True)
+            py_subprocess.run(
+                ["git", "config", "user.email", "test@example.com"], cwd=repo, check=True, capture_output=True, text=True
+            )
+            py_subprocess.run(
+                ["git", "config", "user.name", "Test User"], cwd=repo, check=True, capture_output=True, text=True
+            )
+            py_subprocess.run(["git", "add", "orchestration.xml"], cwd=repo, check=True, capture_output=True, text=True)
+            py_subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, text=True)
+
+            loop = orchestrator.WatchLoop(
+                conversation_file=conversation,
+                repo_path=repo,
+                poll_seconds=0.01,
+                use_inotify=False,
+            )
+
+            real_run = py_subprocess.run
+
+            def fake_run(cmd, *args, **kwargs):
+                if isinstance(cmd, list) and cmd and cmd[0] == "tmux":
+                    if len(cmd) > 1 and cmd[1] == "new-session":
+                        shell_cmd = cmd[-1]
+                        match = re.search(r">\s*(?:'([^']+)'|(\S+))\s+2>&1", shell_cmd)
+                        self.assertIsNotNone(match, "unable to parse tmux log redirection path")
+                        log_path = Path(match.group(1) or match.group(2))
+                        log_path.parent.mkdir(parents=True, exist_ok=True)
+                        log_path.write_text(
+                            (
+                                '{"type":"thread.started","thread_id":"sess-integration"}\n'
+                                '{"type":"item.completed","item":{"type":"agent_message","text":"OK"}}\n'
+                            ),
+                            encoding="utf-8",
+                        )
+                        return py_subprocess.CompletedProcess(cmd, 0, "", "")
+                    if len(cmd) > 1 and cmd[1] == "has-session":
+                        return py_subprocess.CompletedProcess(cmd, 1, "", "")
+                    if len(cmd) > 1 and cmd[1] == "kill-session":
+                        return py_subprocess.CompletedProcess(cmd, 0, "", "")
+                return real_run(cmd, *args, **kwargs)
+
+            with mock.patch("orchestrator.subprocess.run", side_effect=fake_run):
+                loop.tick()
+                self.assertIsNotNone(loop.active_run)
+                loop.tick()
+                self.assertIsNone(loop.active_run)
+
+            root = ET.parse(conversation).getroot()
+            human = root.find("human")
+            assistant = root.find("assistant")
+            self.assertIsNotNone(human)
+            self.assertIsNotNone(assistant)
+            self.assertEqual((assistant.text or "").strip(), "OK")
+            self.assertEqual(assistant.get("status"), "ok")
+            self.assertEqual(assistant.get("session_id"), "sess-integration")
+            self.assertIsNone(human.get("running"))
 
 
 if __name__ == "__main__":
