@@ -104,6 +104,7 @@ class WatchLoop:
         if self.active_run is not None:
             active = self._resolve_active_human(root)
             if active is not None and (active.get("killed", "")).lower() == "true":
+                active.attrib.pop("running", None)
                 self._kill_active("killed by user")
                 insert_assistant_after_human(
                     root,
