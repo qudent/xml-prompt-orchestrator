@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import argparse
 import copy
+import ctypes
 import json
 import os
 import re
+import select
 import shlex
+import struct
 import subprocess
 import tempfile
 import time
@@ -21,6 +24,130 @@ from typing import Optional
 HUMAN_TAG = "human"
 ASSISTANT_TAG = "assistant"
 BRANCH_TAG = "branch"
+
+# Linux inotify constants.
+IN_ATTRIB = 0x00000004
+IN_CLOSE_WRITE = 0x00000008
+IN_CREATE = 0x00000100
+IN_DELETE_SELF = 0x00000400
+IN_IGNORED = 0x00008000
+IN_MOVE_SELF = 0x00000800
+IN_MOVED_TO = 0x00000080
+IN_Q_OVERFLOW = 0x00004000
+
+
+class LinuxInotifyWatcher:
+    """Watch a single file path via inotify events on its parent directory."""
+
+    _HEADER = struct.Struct("iIII")
+    _MASK = (
+        IN_ATTRIB
+        | IN_CLOSE_WRITE
+        | IN_CREATE
+        | IN_DELETE_SELF
+        | IN_IGNORED
+        | IN_MOVE_SELF
+        | IN_MOVED_TO
+        | IN_Q_OVERFLOW
+    )
+
+    def __init__(self, file_path: Path):
+        self.file_path = file_path
+        self.fd: Optional[int] = None
+        self.wd: Optional[int] = None
+        self._libc: Optional[ctypes.CDLL] = None
+        if os.name != "posix":
+            return
+        try:
+            libc = ctypes.CDLL("libc.so.6", use_errno=True)
+            libc.inotify_init1.argtypes = [ctypes.c_int]
+            libc.inotify_init1.restype = ctypes.c_int
+            libc.inotify_add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
+            libc.inotify_add_watch.restype = ctypes.c_int
+        except OSError:
+            return
+        self._libc = libc
+        self._open()
+
+    @property
+    def available(self) -> bool:
+        return self.fd is not None and self.wd is not None
+
+    def _open(self) -> None:
+        if self._libc is None:
+            return
+        flags = os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
+        fd = self._libc.inotify_init1(flags)
+        if fd < 0:
+            return
+        self.fd = fd
+        self._ensure_watch()
+
+    def _ensure_watch(self) -> None:
+        if self._libc is None or self.fd is None:
+            return
+        dir_bytes = os.fsencode(str(self.file_path.parent))
+        wd = self._libc.inotify_add_watch(self.fd, ctypes.c_char_p(dir_bytes), self._MASK)
+        if wd < 0:
+            self.close()
+            return
+        self.wd = wd
+
+    def wait(self, timeout_seconds: Optional[float]) -> bool:
+        if self.fd is None or self.wd is None:
+            if timeout_seconds is not None:
+                time.sleep(timeout_seconds)
+            return False
+        try:
+            ready, _, _ = select.select([self.fd], [], [], timeout_seconds)
+        except OSError:
+            return False
+        if not ready:
+            return False
+
+        changed = False
+        while True:
+            try:
+                raw = os.read(self.fd, 64 * 1024)
+            except BlockingIOError:
+                break
+            except OSError:
+                break
+            if not raw:
+                break
+            offset = 0
+            while offset + self._HEADER.size <= len(raw):
+                wd, mask, _cookie, name_len = self._HEADER.unpack_from(raw, offset)
+                offset += self._HEADER.size
+                raw_name = raw[offset : offset + name_len]
+                offset += name_len
+                name = raw_name.split(b"\x00", 1)[0].decode("utf-8", errors="ignore")
+
+                if mask & IN_Q_OVERFLOW:
+                    changed = True
+                    continue
+                if mask & (IN_IGNORED | IN_DELETE_SELF | IN_MOVE_SELF):
+                    changed = True
+                    self.wd = None
+                    self._ensure_watch()
+                    continue
+                if wd != self.wd:
+                    continue
+                if name and name != self.file_path.name:
+                    continue
+                changed = True
+        return changed
+
+    def close(self) -> None:
+        if self.fd is None:
+            return
+        try:
+            os.close(self.fd)
+        except OSError:
+            pass
+        finally:
+            self.fd = None
+            self.wd = None
 
 
 def new_short_id() -> str:
@@ -247,6 +374,15 @@ def atomic_write(path: Path, text: str) -> None:
     os.replace(temp_name, path)
 
 
+def write_if_changed(path: Path, text: str) -> bool:
+    if path.exists():
+        current_text = path.read_text(encoding="utf-8")
+        if current_text == text:
+            return False
+    atomic_write(path, text)
+    return True
+
+
 def read_root(path: Path) -> ET.Element:
     if not path.exists():
         root = ET.Element("conversation", {"backend": "codex"})
@@ -296,7 +432,13 @@ class ActiveRun:
 
 
 class WatchLoop:
-    def __init__(self, conversation_file: Path, repo_path: Path, poll_seconds: float = 1.0):
+    def __init__(
+        self,
+        conversation_file: Path,
+        repo_path: Path,
+        poll_seconds: float = 1.0,
+        use_inotify: bool = True,
+    ):
         self.conversation_file = conversation_file
         self.repo_path = repo_path
         self.poll_seconds = poll_seconds
@@ -305,11 +447,29 @@ class WatchLoop:
         self.previous_root: Optional[ET.Element] = None
         self.last_mtime = 0.0
         self.active_run: Optional[ActiveRun] = None
+        self.watcher: Optional[LinuxInotifyWatcher] = None
+        if use_inotify:
+            watcher = LinuxInotifyWatcher(self.conversation_file)
+            if watcher.available:
+                self.watcher = watcher
 
     def run(self) -> None:
-        while True:
-            self.tick()
-            time.sleep(self.poll_seconds)
+        try:
+            while True:
+                self.tick()
+                self._wait_for_next_tick()
+        finally:
+            if self.watcher is not None:
+                self.watcher.close()
+
+    def _wait_for_next_tick(self) -> None:
+        timeout = self.poll_seconds if self.active_run is not None else None
+        if self.watcher is not None:
+            self.watcher.wait(timeout)
+            return
+        if timeout is None:
+            timeout = self.poll_seconds
+        time.sleep(timeout)
 
     def tick(self) -> None:
         if self.active_run is not None:
@@ -355,8 +515,11 @@ class WatchLoop:
         self._write_root(root)
         self.previous_root = copy.deepcopy(root)
 
-    def _write_root(self, root: ET.Element) -> None:
-        atomic_write(self.conversation_file, canonical_xml_text(root))
+    def _write_root(self, root: ET.Element) -> bool:
+        changed = write_if_changed(self.conversation_file, canonical_xml_text(root))
+        if changed:
+            self.last_mtime = self.conversation_file.stat().st_mtime
+        return changed
 
     def _start_run(self, root: ET.Element, human: ET.Element) -> None:
         backend = root.get("backend", "codex").lower()
@@ -455,11 +618,22 @@ def main() -> None:
     parser.add_argument("conversation_file", help="Path to conversation XML file")
     parser.add_argument("--repo", default=".", help="Git repo path (default: .)")
     parser.add_argument("--poll-seconds", type=float, default=1.0, help="Watch polling interval")
+    parser.add_argument(
+        "--watch-mode",
+        choices=("auto", "poll"),
+        default="auto",
+        help="File watch mode: 'auto' uses inotify when available, 'poll' disables inotify.",
+    )
     args = parser.parse_args()
 
     conversation_file = Path(args.conversation_file).resolve()
     repo_path = Path(args.repo).resolve()
-    loop = WatchLoop(conversation_file=conversation_file, repo_path=repo_path, poll_seconds=args.poll_seconds)
+    loop = WatchLoop(
+        conversation_file=conversation_file,
+        repo_path=repo_path,
+        poll_seconds=args.poll_seconds,
+        use_inotify=(args.watch_mode == "auto"),
+    )
     loop.run()
 
 

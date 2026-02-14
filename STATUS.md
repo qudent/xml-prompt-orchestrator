@@ -1,7 +1,7 @@
 # XML Prompt Orchestrator - Status
 
 ## Current State
-v1 is implemented and test-covered in this repo. The project now has a working `orchestrator.py`, unit tests, locked design decisions in the PRD, and a configured Ralph loop (`scripts/ralph/`) with project-specific `prd.json` and `progress.txt`. Ralph smoke-run has been executed and returned `<promise>COMPLETE</promise>`.
+v1 is implemented, test-covered, and now patched to avoid self-triggering save loops in Dropbox-backed repos. As of 2026-02-14, the watcher supports Linux inotify push notifications (`--watch-mode auto`) with polling fallback, and identical XML content is no longer rewritten.
 
 ## Active Goals
 - [x] Finalize product decisions
@@ -16,27 +16,28 @@ v1 is implemented and test-covered in this repo. The project now has a working `
   - [x] Implement fork detection and branch creation logic
   - [x] Implement watch loop, tmux launch/cleanup, and assistant writeback
   - [x] Verify tests pass
-- [x] Configure Ralph loop for this project
-  - [x] Add `scripts/ralph/ralph.sh`
-  - [x] Add `scripts/ralph/prd.json` with story tracking
-  - [x] Add `scripts/ralph/progress.txt`
-  - [x] Add project quality command to `scripts/ralph/CODEX.md` and `scripts/ralph/CLAUDE.md`
+- [x] Fix Dropbox churn / self-write loop
+  - [x] Identify loop source (`_write_root` always rewriting)
+  - [x] Add content-aware write guard (`write_if_changed`)
+  - [x] Add Linux inotify watcher with polling fallback
+  - [x] Add regression test for no-op write behavior
+  - [x] Verify Dropbox returns to steady state after stopping pollers
+- [ ] Add one integration test for tmux lifecycle + assistant writeback
 
 ## Blockers
-- None for v1 implementation.
-- Future blocker risk: real-world backend output shape changes may require parser adjustments.
+- None for current local workflow.
+- Future risk: backend output format drift may require parser updates.
 
 ## Recent Results
-- Added `orchestrator.py` implementing XML parsing, canonical writes, fork creation, backend invocation, tmux lifecycle, and cancellation handling.
-- Added `tests/test_orchestrator.py` with tests for command generation, output parsing, pending detection, and middle-edit forking.
-- Locked the PRD into explicit decisions and removed open-question ambiguity.
-- Added Ralph loop files under `scripts/ralph/` and converted project plan into `scripts/ralph/prd.json`.
-- Added `.gitignore` entries for Python cache and orchestrator runtime logs.
-- Ran a live smoke test: XML watcher executed Codex in tmux, captured `session_id`, and wrote assistant response back into the file.
-- Ran `scripts/ralph/ralph.sh --tool codex 1`; loop completed with `<promise>COMPLETE</promise>` and moved work to branch `ralph/xml-prompt-orchestrator-v1`.
-- Added ignore rules for Ralph runtime files (`scripts/ralph/.last-branch`, `scripts/ralph/archive/`) to keep worktree clean.
-- Updated Ralph prompt templates to explicitly reference `scripts/ralph/prd.json` and `scripts/ralph/progress.txt`.
+- Diagnosed Dropbox backlog growth to two active orchestrator pollers writing files under `~/Dropbox` every second.
+- Confirmed pending Dropbox count grew continuously while pollers ran, then drained quickly after stopping them.
+- Implemented no-op write suppression so unchanged canonical XML does not update mtime.
+- Added `LinuxInotifyWatcher` and `--watch-mode {auto,poll}` CLI option.
+- Updated bootstrap script to launch watcher with `--watch-mode auto`.
+- Added test `test_write_if_changed_skips_identical_content`.
+- Test suite passes: `python3 -m unittest discover -s tests -v`.
 
 ## Next Steps
-1. Add one integration test that simulates tmux lifecycle and assistant writeback with a fake backend command.
-2. If desired, continue iterative work on `ralph/xml-prompt-orchestrator-v1` via `scripts/ralph/ralph.sh`.
+1. Add a focused integration test that simulates tmux session completion and assistant writeback.
+2. Consider ignoring high-churn generated paths (for example `.venv`, `.cache`, model artifacts) in Dropbox test repos.
+3. Optionally expose a `--once` debug mode for deterministic local troubleshooting.

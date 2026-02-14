@@ -26,7 +26,7 @@ Planning docs:
 2. Run the watcher:
 
 ```bash
-python orchestrator.py /path/to/conversation.xml --repo /path/to/repo
+python orchestrator.py /path/to/conversation.xml --repo /path/to/repo --watch-mode auto
 ```
 
 3. Edit and save the XML file in any plain text editor:

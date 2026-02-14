@@ -1,6 +1,9 @@
 import copy
+import tempfile
+import time
 import unittest
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import orchestrator
 
@@ -78,6 +81,17 @@ class OrchestratorLogicTests(unittest.TestCase):
         fork_human = branches[0].find("human")
         self.assertIsNotNone(fork_human)
         self.assertEqual((fork_human.text or "").strip(), "Question 1 edited")
+
+    def test_write_if_changed_skips_identical_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "orchestration.xml"
+            text = "<conversation backend=\"codex\" />\n"
+            self.assertTrue(orchestrator.write_if_changed(target, text))
+            first_mtime = target.stat().st_mtime_ns
+            time.sleep(0.01)
+            self.assertFalse(orchestrator.write_if_changed(target, text))
+            second_mtime = target.stat().st_mtime_ns
+            self.assertEqual(first_mtime, second_mtime)
 
 
 if __name__ == "__main__":
