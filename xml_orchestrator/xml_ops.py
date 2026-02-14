@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import uuid
 import xml.etree.ElementTree as ET
+from collections import Counter
 from pathlib import Path
 from typing import Optional
 
@@ -67,6 +69,120 @@ def previous_assistant_session(parent: ET.Element, human: ET.Element) -> Optiona
         if session_id:
             return session_id
     return None
+
+
+def _container_nodes(root: ET.Element) -> list[ET.Element]:
+    nodes: list[ET.Element] = []
+    for node in root.iter():
+        if node.tag in ("conversation", BRANCH_TAG):
+            nodes.append(node)
+    return nodes
+
+
+def normalize_free_text_humans(root: ET.Element) -> int:
+    """
+    Convert bare text nodes in conversation/branch containers into <human> nodes.
+
+    This lets users type plain text anywhere between XML elements and have it
+    normalized into explicit human messages at the same structural position.
+    """
+    changed = 0
+    for parent in _container_nodes(root):
+        initial_text = (parent.text or "").strip()
+        if initial_text:
+            new_human = ET.Element(HUMAN_TAG)
+            new_human.text = initial_text
+            parent.insert(0, new_human)
+            changed += 1
+        parent.text = None
+
+        for child in list(parent):
+            tail_text = (child.tail or "").strip()
+            child.tail = None
+            if not tail_text:
+                continue
+            new_human = ET.Element(HUMAN_TAG)
+            new_human.text = tail_text
+            insert_after(parent, child, new_human)
+            changed += 1
+    return changed
+
+
+def _previous_human_id(parent: ET.Element, human: ET.Element) -> Optional[str]:
+    siblings = _siblings(parent, human)
+    idx = _node_index(parent, human)
+    for sibling in reversed(siblings[:idx]):
+        if sibling.tag != HUMAN_TAG:
+            continue
+        message_id = sibling.get("id")
+        if message_id:
+            return message_id
+    return None
+
+
+def _has_following_messages(parent: ET.Element, human: ET.Element) -> bool:
+    siblings = _siblings(parent, human)
+    idx = _node_index(parent, human)
+    return bool(siblings[idx + 1 :])
+
+
+def _human_sequence_signatures(root: ET.Element) -> list[tuple[ET.Element, str]]:
+    text_counts: dict[str, int] = {}
+    signatures: list[tuple[ET.Element, str]] = []
+    for human in root.iter(HUMAN_TAG):
+        message_id = human.get("id")
+        if message_id:
+            signature = f"id:{message_id}"
+        else:
+            digest = hashlib.sha1(human_text(human).encode("utf-8")).hexdigest()[:16]
+            text_counts[digest] = text_counts.get(digest, 0) + 1
+            signature = f"text:{digest}:{text_counts[digest]}"
+        signatures.append((human, signature))
+    return signatures
+
+
+def fork_new_middle_humans(current_root: ET.Element, previous_root: Optional[ET.Element]) -> int:
+    """
+    Fork newly inserted middle humans that would otherwise overwrite timeline order.
+    """
+    if previous_root is None:
+        return 0
+
+    previous_counts = Counter(signature for _, signature in _human_sequence_signatures(previous_root))
+    changed = 0
+    parents = parent_map(current_root)
+    for human, signature in _human_sequence_signatures(current_root):
+        if previous_counts[signature] > 0:
+            previous_counts[signature] -= 1
+            continue
+
+        parent = parents.get(human)
+        if parent is None:
+            continue
+        if parent.tag == BRANCH_TAG:
+            continue
+        if not _has_following_messages(parent, human):
+            continue
+
+        branch_attrs = {"id": new_short_id()}
+        from_id = _previous_human_id(parent, human)
+        if from_id:
+            branch_attrs["from"] = from_id
+        branch = ET.Element(BRANCH_TAG, branch_attrs)
+
+        if human.get("id") is None:
+            human.set("id", new_short_id())
+        if human.get("resume_from") is None:
+            resume_from = previous_assistant_session(parent, human)
+            if resume_from:
+                human.set("resume_from", resume_from)
+
+        idx = _node_index(parent, human)
+        parent.remove(human)
+        branch.append(human)
+        parent.insert(idx, branch)
+        changed += 1
+    return changed
 
 
 def apply_middle_edit_forks(current_root: ET.Element, previous_root: Optional[ET.Element]) -> int:

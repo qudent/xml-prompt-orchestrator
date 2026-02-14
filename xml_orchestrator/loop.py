@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import html
+import re
 import shlex
 import subprocess
 import xml.etree.ElementTree as ET
@@ -20,9 +22,11 @@ from .xml_ops import (
     annotate_git,
     apply_middle_edit_forks,
     find_message_by_id,
+    fork_new_middle_humans,
     has_following_assistant,
     human_text,
     insert_assistant_after_human,
+    normalize_free_text_humans,
     new_short_id,
     parent_map,
     previous_assistant_session,
@@ -114,8 +118,10 @@ class WatchLoop:
         self._process_save()
 
     def _process_save(self) -> None:
-        root = read_root(self.conversation_file)
-        changed = apply_middle_edit_forks(root, self.previous_root) > 0
+        root, changed = self._read_root_with_autofix()
+        changed = normalize_free_text_humans(root) > 0 or changed
+        changed = apply_middle_edit_forks(root, self.previous_root) > 0 or changed
+        changed = fork_new_middle_humans(root, self.previous_root) > 0 or changed
 
         # Handle user-triggered cancellations for any active run.
         for run in list(self.active_runs.values()):
@@ -213,7 +219,14 @@ class WatchLoop:
         if not prompt:
             return
 
-        session_id = candidate.element.get("resume_from") or self._find_resume_for_human(root, candidate.element)
+        explicit_resume = candidate.element.get("resume_from")
+        if explicit_resume:
+            session_id = explicit_resume
+        elif self.active_runs:
+            # Isolation rule: parallel runs should not inherit context from each other.
+            session_id = None
+        else:
+            session_id = self._find_resume_for_human(root, candidate.element)
         cmd = build_backend_command(backend, prompt, session_id)
 
         run_id = new_short_id()
@@ -342,7 +355,7 @@ class WatchLoop:
                 text=True,
             )
 
-            root = read_root(self.conversation_file)
+            root, _ = self._read_root_with_autofix()
             target = self._resolve_target_human(root, run, include_killed=True)
 
             output = run.log_path.read_text(encoding="utf-8") if run.log_path.exists() else ""
@@ -360,3 +373,31 @@ class WatchLoop:
                 status=status,
                 target=target,
             )
+
+    def _extract_plain_text_candidates(self, raw_text: str) -> list[str]:
+        # Best-effort fallback for malformed XML: extract user-typed free text.
+        text = re.sub(r"<[^>]+>", "\n", raw_text)
+        text = html.unescape(text)
+        chunks = [line.strip() for line in text.splitlines() if line.strip()]
+        if not chunks:
+            return []
+        return chunks
+
+    def _read_root_with_autofix(self) -> tuple[ET.Element, bool]:
+        try:
+            return read_root(self.conversation_file), False
+        except ET.ParseError:
+            raw = self.conversation_file.read_text(encoding="utf-8", errors="replace")
+            if self.previous_root is not None:
+                root = copy.deepcopy(self.previous_root)
+            else:
+                root = ET.Element("conversation", {"backend": "codex"})
+
+            existing = {human_text(node) for node in root.iter(HUMAN_TAG)}
+            candidates = self._extract_plain_text_candidates(raw)
+            if candidates:
+                selected = next((chunk for chunk in reversed(candidates) if chunk not in existing), candidates[-1])
+                human = ET.Element(HUMAN_TAG)
+                human.text = selected
+                root.append(human)
+            return root, True

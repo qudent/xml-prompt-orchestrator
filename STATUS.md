@@ -1,7 +1,7 @@
 # XML Prompt Orchestrator - Status
 
 ## Current State
-Runtime is modularized under `xml_orchestrator/` with all implementation files under ~500 lines. The watcher now launches runs from save diffs, supports parallel active questions, and defers normal prompt id writeback until assistant completion so id+assistant persist together.
+Runtime is modularized under `xml_orchestrator/` with implementation files under ~500 lines. The watcher now auto-normalizes free text into `<human>` nodes, forks newly inserted middle messages, appends bottom messages in-place, launches runs from save diffs, supports parallel active questions, and defers prompt-id writeback until completion so `id+assistant` are persisted together.
 
 ## Active Goals
 - [x] Finalize product decisions
@@ -28,22 +28,24 @@ Runtime is modularized under `xml_orchestrator/` with all implementation files u
   - [x] Allow multiple concurrent active runs
   - [x] Avoid duplicate relaunch on pure resaves
   - [x] Keep tmux cleanup on completion/cancel
+- [x] Implement plain-text anywhere auto-heal semantics
+  - [x] Wrap bare text nodes into `<human>` in `conversation`/`branch`
+  - [x] Fork only newly introduced middle humans (baseline-aware)
+  - [x] Keep bottom appended humans on main line
+  - [x] Ensure second save while first run is active launches isolated context
 
 ## Blockers
 - None.
-- Backend/network interruptions can still yield partial/no final assistant messages for a run; those are surfaced as `status="error"` assistant nodes.
+- Backend/network interruptions can still yield partial/no final assistant messages for a run; these are written as `status="error"` assistant nodes.
 
 ## Recent Results
-- Reworked `WatchLoop` for multi-run state (`active_runs`) instead of single-run state.
-- Added unresolved-human signature diffing to determine launch candidates per save.
-- Removed pre-answer marker writes from normal starts; completion writes id+assistant together.
-- Added regression test: `test_start_defers_id_write_until_completion`.
-- Added regression test: `test_diff_save_launches_parallel_runs_without_duplicates`.
-- Existing stale-resave and tmux lifecycle integration tests still pass.
-- Live verification on `/home/name/Dropbox/xml-orchestrator-test-20260214-110942`:
-  - added two humans in one save
-  - both received distinct assistant replies (`P1`, `P2`)
-  - watcher session is running with updated code.
+- Added malformed-XML auto-recovery path that converts user free text into a new `<human>` instead of crashing parse flow.
+- Updated middle insertion logic to use baseline diffing so existing answered humans are not re-forked.
+- Added integration-style test coverage for:
+  - plain text middle insertion -> branch fork + resume linkage
+  - plain text bottom append across consecutive saves -> new run per save + isolated second run context
+  - pure re-save no-op launch behavior
+- Full test suite currently passing: `python3 -m unittest discover -s tests -v` (13 tests).
 
 ## Next Steps
 1. Optional: add visible heartbeat/progress timestamp for long-running runs.
