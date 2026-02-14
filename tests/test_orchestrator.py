@@ -15,6 +15,16 @@ def parse_xml(text: str) -> ET.Element:
     return ET.fromstring(text)
 
 
+def init_git_repo(repo: Path) -> None:
+    py_subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True, text=True)
+    py_subprocess.run(
+        ["git", "config", "user.email", "test@example.com"], cwd=repo, check=True, capture_output=True, text=True
+    )
+    py_subprocess.run(
+        ["git", "config", "user.name", "Test User"], cwd=repo, check=True, capture_output=True, text=True
+    )
+
+
 class OrchestratorLogicTests(unittest.TestCase):
     def test_build_backend_command(self) -> None:
         cmd = orchestrator.build_backend_command("codex", "hello", None)
@@ -110,13 +120,7 @@ class OrchestratorLogicTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            py_subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True, text=True)
-            py_subprocess.run(
-                ["git", "config", "user.email", "test@example.com"], cwd=repo, check=True, capture_output=True, text=True
-            )
-            py_subprocess.run(
-                ["git", "config", "user.name", "Test User"], cwd=repo, check=True, capture_output=True, text=True
-            )
+            init_git_repo(repo)
             py_subprocess.run(["git", "add", "orchestration.xml"], cwd=repo, check=True, capture_output=True, text=True)
             py_subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, text=True)
 
@@ -179,13 +183,7 @@ class OrchestratorLogicTests(unittest.TestCase):
             conversation = repo / "orchestration.xml"
             conversation.write_text(original_text, encoding="utf-8")
 
-            py_subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True, text=True)
-            py_subprocess.run(
-                ["git", "config", "user.email", "test@example.com"], cwd=repo, check=True, capture_output=True, text=True
-            )
-            py_subprocess.run(
-                ["git", "config", "user.name", "Test User"], cwd=repo, check=True, capture_output=True, text=True
-            )
+            init_git_repo(repo)
             py_subprocess.run(["git", "add", "orchestration.xml"], cwd=repo, check=True, capture_output=True, text=True)
             py_subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, text=True)
 
@@ -243,6 +241,116 @@ class OrchestratorLogicTests(unittest.TestCase):
             self.assertEqual((assistants[-1].text or "").strip(), "OK")
             self.assertEqual(assistants[-1].get("status"), "ok")
             self.assertEqual(assistants[-1].get("session_id"), "sess-recover")
+
+    def test_start_defers_id_write_until_completion(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "repo"
+            repo.mkdir()
+            original_text = (
+                "<conversation backend=\"codex\">\n"
+                "  <human>Question A</human>\n"
+                "</conversation>\n"
+            )
+            conversation = repo / "orchestration.xml"
+            conversation.write_text(original_text, encoding="utf-8")
+
+            init_git_repo(repo)
+            py_subprocess.run(["git", "add", "orchestration.xml"], cwd=repo, check=True, capture_output=True, text=True)
+            py_subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, text=True)
+
+            loop = orchestrator.WatchLoop(
+                conversation_file=conversation,
+                repo_path=repo,
+                poll_seconds=0.01,
+                use_inotify=False,
+            )
+
+            real_run = py_subprocess.run
+
+            def fake_run(cmd, *args, **kwargs):
+                if isinstance(cmd, list) and cmd and cmd[0] == "tmux":
+                    if len(cmd) > 1 and cmd[1] == "new-session":
+                        return py_subprocess.CompletedProcess(cmd, 0, "", "")
+                    if len(cmd) > 1 and cmd[1] == "has-session":
+                        return py_subprocess.CompletedProcess(cmd, 0, "", "")
+                    if len(cmd) > 1 and cmd[1] == "kill-session":
+                        return py_subprocess.CompletedProcess(cmd, 0, "", "")
+                return real_run(cmd, *args, **kwargs)
+
+            with mock.patch("orchestrator.subprocess.run", side_effect=fake_run):
+                loop.tick()
+                self.assertIsNotNone(loop.active_run)
+
+            current = conversation.read_text(encoding="utf-8")
+            # One-go semantics: no id/running marker write before assistant completion.
+            self.assertEqual(current, original_text)
+
+    def test_diff_save_launches_parallel_runs_without_duplicates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "repo"
+            repo.mkdir()
+            conversation = repo / "orchestration.xml"
+            conversation.write_text(
+                (
+                    "<conversation backend=\"codex\">\n"
+                    "  <human>Q1</human>\n"
+                    "</conversation>\n"
+                ),
+                encoding="utf-8",
+            )
+
+            init_git_repo(repo)
+            py_subprocess.run(["git", "add", "orchestration.xml"], cwd=repo, check=True, capture_output=True, text=True)
+            py_subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, text=True)
+
+            loop = orchestrator.WatchLoop(
+                conversation_file=conversation,
+                repo_path=repo,
+                poll_seconds=0.01,
+                use_inotify=False,
+            )
+
+            real_run = py_subprocess.run
+            new_sessions: list[str] = []
+
+            def fake_run(cmd, *args, **kwargs):
+                if isinstance(cmd, list) and cmd and cmd[0] == "tmux":
+                    if len(cmd) > 1 and cmd[1] == "new-session":
+                        session_name = cmd[4]
+                        new_sessions.append(session_name)
+                        return py_subprocess.CompletedProcess(cmd, 0, "", "")
+                    if len(cmd) > 1 and cmd[1] == "has-session":
+                        return py_subprocess.CompletedProcess(cmd, 0, "", "")
+                    if len(cmd) > 1 and cmd[1] == "kill-session":
+                        return py_subprocess.CompletedProcess(cmd, 0, "", "")
+                return real_run(cmd, *args, **kwargs)
+
+            with mock.patch("orchestrator.subprocess.run", side_effect=fake_run):
+                # First save launches one run for Q1.
+                loop.tick()
+                self.assertEqual(len(new_sessions), 1)
+                self.assertEqual(len(loop.active_runs), 1)
+
+                # New save adds Q2; should launch a second run without relaunching Q1.
+                conversation.write_text(
+                    (
+                        "<conversation backend=\"codex\">\n"
+                        "  <human>Q1</human>\n"
+                        "  <human>Q2</human>\n"
+                        "</conversation>\n"
+                    ),
+                    encoding="utf-8",
+                )
+                loop.tick()
+                self.assertEqual(len(new_sessions), 2)
+                self.assertEqual(len(loop.active_runs), 2)
+
+                # Pure re-save (no content diff) should not spawn new runs.
+                same_text = conversation.read_text(encoding="utf-8")
+                conversation.write_text(same_text, encoding="utf-8")
+                loop.tick()
+                self.assertEqual(len(new_sessions), 2)
+                self.assertEqual(len(loop.active_runs), 2)
 
 
 if __name__ == "__main__":

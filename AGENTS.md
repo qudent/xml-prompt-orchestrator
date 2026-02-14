@@ -2,6 +2,13 @@
 
 This repo is intentionally split into small modules. Keep each source file under ~500 lines.
 
+## Behavioral Contract
+
+- The watcher launches runs from XML save diffs only.
+- The watcher can run multiple backend turns in parallel.
+- For normal runs, a prompt's `id` and assistant response are written together at completion (single writeback event).
+- Completed/canceled runs must clean up their tmux session.
+
 ## File Map
 
 - `orchestrator.py`
@@ -14,8 +21,8 @@ This repo is intentionally split into small modules. Keep each source file under
 
 - `xml_orchestrator/loop.py`
   - Core runtime state machine.
-  - Watches for file changes, starts tmux runs, checks completion, writes assistant output.
-  - Includes stale-save recovery for active runs (if manual editor save removes `id`/`running` markers).
+  - Save-diff detection, parallel run launch, tmux lifecycle, and assistant writeback.
+  - Active-run target recovery if user edits/resaves while runs are in flight.
 
 - `xml_orchestrator/watcher.py`
   - Linux inotify watcher wrapper with poll fallback behavior.
@@ -25,7 +32,7 @@ This repo is intentionally split into small modules. Keep each source file under
   - Streaming output parsing to `(session_id, final_message)`.
 
 - `xml_orchestrator/xml_ops.py`
-  - XML tree operations: pending detection, middle-edit forks, assistant insertion, git annotations.
+  - XML tree operations: middle-edit forks, assistant insertion, git annotations.
 
 - `xml_orchestrator/storage.py`
   - Canonical XML serialization and atomic writes.
@@ -36,13 +43,16 @@ This repo is intentionally split into small modules. Keep each source file under
 
 - `tests/test_orchestrator.py`
   - Unit tests + integration-style tests using mocked tmux subprocess behavior.
+  - Includes regression tests for stale resaves, diff-based launches, and deferred id writeback.
 
 ## Editing Rules
 
 - Prefer extending module-specific files over growing `orchestrator.py`.
 - Keep business logic out of shell scripts.
-- Add/adjust tests for any loop behavior changes, especially around:
-  - active run lifecycle
+- Add/adjust tests for loop behavior changes, especially around:
+  - save-diff launch detection
+  - parallel active runs
   - stale editor resaves
   - assistant writeback placement
-- If module boundaries shift, update this file and `STATUS.md` in the same commit.
+  - tmux cleanup
+- If module boundaries or runtime semantics shift, update this file and `STATUS.md` in the same commit.
